@@ -4,7 +4,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QFileDialog, QListWidget, QListWidgetItem, QSlider, QGroupBox, QFormLayout, 
-    QSpinBox, QFrame, QDoubleSpinBox, QScrollArea
+    QSpinBox, QFrame, QDoubleSpinBox, QScrollArea, QComboBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QImage, QFont
@@ -16,12 +16,8 @@ METHODS = [
     "Grayscale",
     "Histogram Equalization",
     "Threshold (Binary)",
-    "Gaussian Blur",
-    "Median Blur",
-    "Bilateral Filter",
-    "Canny Edge Detection",
-    "Sobel Edge Detection",
-    "Laplacian Edge Detection",
+    "Blurring/Smoothing",
+    "Edge Detection",  # Menggabungkan berbagai jenis edge detection
     "Morphology (Open)",
     "Morphology (Close)",
     "Dilation",
@@ -35,12 +31,8 @@ METHOD_DESCRIPTIONS = {
     "Grayscale": "Konversi gambar ke skala abu-abu",
     "Histogram Equalization": "Pemerataan histogram standar",
     "Threshold (Binary)": "Konversi ke gambar biner hitam-putih",
-    "Gaussian Blur": "Blur dengan kernel Gaussian",
-    "Median Blur": "Blur median untuk noise reduction",
-    "Bilateral Filter": "Filter yang menjaga edge sambil blur",
-    "Canny Edge Detection": "Deteksi tepi Canny",
-    "Sobel Edge Detection": "Deteksi tepi Sobel",
-    "Laplacian Edge Detection": "Deteksi tepi Laplacian",
+    "Blurring/Smoothing": "Berbagai teknik blur dan smoothing gambar",
+    "Edge Detection": "Berbagai teknik deteksi tepi pada gambar",
     "Morphology (Open)": "Operasi morfologi opening",
     "Morphology (Close)": "Operasi morfologi closing",
     "Dilation": "Operasi dilasi (memperbesar objek)",
@@ -109,7 +101,7 @@ class HistogramCanvas(FigureCanvas):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Image Processing App - Enhanced (16 Fitur) - PySide6 + OpenCV")
+        self.setWindowTitle("Image Processing App - Enhanced (12 Fitur) - PySide6 + OpenCV")
         self.orig = None  # original cv image (BGR)
         self.result = None  # result cv image (BGR or gray)
         self._setup_ui()
@@ -121,7 +113,7 @@ class MainWindow(QMainWindow):
         
         # Left Panel - Controls
         left_panel = QFrame()
-        left_panel.setFixedWidth(420)
+        left_panel.setFixedWidth(450)
         left_panel.setStyleSheet("""
             QFrame {
                 background-color: #ffffff;
@@ -224,7 +216,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(file_group)
         
         # Processing Methods Group
-        method_group = QGroupBox("⚙️ Processing Methods (16 Fitur)")
+        method_group = QGroupBox("⚙️ Processing Methods (12 Fitur)")
         method_group.setStyleSheet(file_group.styleSheet())
         method_layout = QVBoxLayout()
         method_layout.setSpacing(10)
@@ -296,6 +288,48 @@ class MainWindow(QMainWindow):
         self.param_layout.setSpacing(8)
         self.param_layout.setContentsMargins(0, 0, 0, 0)
         
+        # Blur Type ComboBox
+        self.blur_type_widget = QWidget()
+        blur_type_layout = QHBoxLayout(self.blur_type_widget)
+        blur_type_label = QLabel("Blur Type:")
+        blur_type_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.blur_type_combo = QComboBox()
+        self.blur_type_combo.addItems(["Gaussian Blur", "Median Blur", "Mean Blur", "Bilateral Filter"])
+        self.blur_type_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #ced4da;
+                border-radius: 5px;
+                padding: 5px;
+                background-color: #ffffff;
+                color: #343a40;
+                font-weight: bold;
+            }
+        """)
+        blur_type_layout.addWidget(blur_type_label)
+        blur_type_layout.addWidget(self.blur_type_combo)
+        self.param_layout.addWidget(self.blur_type_widget)
+        
+        # Edge Detection Type ComboBox
+        self.edge_type_widget = QWidget()
+        edge_type_layout = QHBoxLayout(self.edge_type_widget)
+        edge_type_label = QLabel("Edge Type:")
+        edge_type_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.edge_type_combo = QComboBox()
+        self.edge_type_combo.addItems(["Canny", "Sobel", "Laplacian"])
+        self.edge_type_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #ced4da;
+                border-radius: 5px;
+                padding: 5px;
+                background-color: #ffffff;
+                color: #343a40;
+                font-weight: bold;
+            }
+        """)
+        edge_type_layout.addWidget(edge_type_label)
+        edge_type_layout.addWidget(self.edge_type_combo)
+        self.param_layout.addWidget(self.edge_type_widget)
+        
         # Kernel Size Parameter
         self.kernel_widget = QWidget()
         kernel_layout = QHBoxLayout(self.kernel_widget)
@@ -311,6 +345,92 @@ class MainWindow(QMainWindow):
         kernel_layout.addWidget(self.kernel_slider)
         kernel_layout.addWidget(self.kernel_value)
         self.param_layout.addWidget(self.kernel_widget)
+        
+        # Bilateral Filter Parameters
+        self.bilateral_widget = QWidget()
+        bilateral_layout = QHBoxLayout(self.bilateral_widget)
+        bilateral_label = QLabel("Diameter:")
+        bilateral_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.bilateral_slider = QSlider(Qt.Horizontal)
+        self.bilateral_slider.setRange(5, 50)
+        self.bilateral_slider.setValue(9)
+        self.bilateral_value = QLabel("9")
+        self.bilateral_value.setStyleSheet("font-weight: bold; color: #343a40;")
+        self.bilateral_slider.valueChanged.connect(lambda v: self.bilateral_value.setText(str(v)))
+        bilateral_layout.addWidget(bilateral_label)
+        bilateral_layout.addWidget(self.bilateral_slider)
+        bilateral_layout.addWidget(self.bilateral_value)
+        self.param_layout.addWidget(self.bilateral_widget)
+        
+        # Sigma Parameters untuk Bilateral
+        self.sigma_widget = QWidget()
+        sigma_layout = QHBoxLayout(self.sigma_widget)
+        sigma_label = QLabel("Sigma:")
+        sigma_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.sigma_slider = QSlider(Qt.Horizontal)
+        self.sigma_slider.setRange(10, 200)
+        self.sigma_slider.setValue(75)
+        self.sigma_value = QLabel("75")
+        self.sigma_value.setStyleSheet("font-weight: bold; color: #343a40;")
+        self.sigma_slider.valueChanged.connect(lambda v: self.sigma_value.setText(str(v)))
+        sigma_layout.addWidget(sigma_label)
+        sigma_layout.addWidget(self.sigma_slider)
+        sigma_layout.addWidget(self.sigma_value)
+        self.param_layout.addWidget(self.sigma_widget)
+        
+        # Canny Parameters
+        self.canny_widget = QWidget()
+        canny_layout = QVBoxLayout(self.canny_widget)
+        
+        # Threshold 1
+        canny_thresh1_widget = QWidget()
+        canny_thresh1_layout = QHBoxLayout(canny_thresh1_widget)
+        canny_thresh1_label = QLabel("Threshold 1:")
+        canny_thresh1_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.canny_thresh1_slider = QSlider(Qt.Horizontal)
+        self.canny_thresh1_slider.setRange(10, 300)
+        self.canny_thresh1_slider.setValue(100)
+        self.canny_thresh1_value = QLabel("100")
+        self.canny_thresh1_value.setStyleSheet("font-weight: bold; color: #343a40;")
+        self.canny_thresh1_slider.valueChanged.connect(lambda v: self.canny_thresh1_value.setText(str(v)))
+        canny_thresh1_layout.addWidget(canny_thresh1_label)
+        canny_thresh1_layout.addWidget(self.canny_thresh1_slider)
+        canny_thresh1_layout.addWidget(self.canny_thresh1_value)
+        canny_layout.addWidget(canny_thresh1_widget)
+        
+        # Threshold 2
+        canny_thresh2_widget = QWidget()
+        canny_thresh2_layout = QHBoxLayout(canny_thresh2_widget)
+        canny_thresh2_label = QLabel("Threshold 2:")
+        canny_thresh2_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.canny_thresh2_slider = QSlider(Qt.Horizontal)
+        self.canny_thresh2_slider.setRange(10, 300)
+        self.canny_thresh2_slider.setValue(200)
+        self.canny_thresh2_value = QLabel("200")
+        self.canny_thresh2_value.setStyleSheet("font-weight: bold; color: #343a40;")
+        self.canny_thresh2_slider.valueChanged.connect(lambda v: self.canny_thresh2_value.setText(str(v)))
+        canny_thresh2_layout.addWidget(canny_thresh2_label)
+        canny_thresh2_layout.addWidget(self.canny_thresh2_slider)
+        canny_thresh2_layout.addWidget(self.canny_thresh2_value)
+        canny_layout.addWidget(canny_thresh2_widget)
+        
+        self.param_layout.addWidget(self.canny_widget)
+        
+        # Sobel Parameters
+        self.sobel_widget = QWidget()
+        sobel_layout = QHBoxLayout(self.sobel_widget)
+        sobel_label = QLabel("Kernel Size:")
+        sobel_label.setStyleSheet("color: #343a40; font-weight: bold;")
+        self.sobel_slider = QSlider(Qt.Horizontal)
+        self.sobel_slider.setRange(1, 7)
+        self.sobel_slider.setValue(3)
+        self.sobel_value = QLabel("3")
+        self.sobel_value.setStyleSheet("font-weight: bold; color: #343a40;")
+        self.sobel_slider.valueChanged.connect(lambda v: self.sobel_value.setText(str(v)))
+        sobel_layout.addWidget(sobel_label)
+        sobel_layout.addWidget(self.sobel_slider)
+        sobel_layout.addWidget(self.sobel_value)
+        self.param_layout.addWidget(self.sobel_widget)
         
         # Threshold Parameter
         self.thresh_widget = QWidget()
@@ -333,38 +453,6 @@ class MainWindow(QMainWindow):
         thresh_layout.addWidget(thresh_label)
         thresh_layout.addWidget(self.spin_thresh)
         self.param_layout.addWidget(self.thresh_widget)
-        
-        # Canny Parameter
-        self.canny_widget = QWidget()
-        canny_layout = QHBoxLayout(self.canny_widget)
-        canny_label = QLabel("Canny Threshold:")
-        canny_label.setStyleSheet("color: #343a40; font-weight: bold;")
-        self.canny_slider = QSlider(Qt.Horizontal)
-        self.canny_slider.setRange(10, 300)
-        self.canny_slider.setValue(100)
-        self.canny_value = QLabel("100")
-        self.canny_value.setStyleSheet("font-weight: bold; color: #343a40;")
-        self.canny_slider.valueChanged.connect(lambda v: self.canny_value.setText(str(v)))
-        canny_layout.addWidget(canny_label)
-        canny_layout.addWidget(self.canny_slider)
-        canny_layout.addWidget(self.canny_value)
-        self.param_layout.addWidget(self.canny_widget)
-        
-        # Bilateral Filter Parameter
-        self.bilateral_widget = QWidget()
-        bilateral_layout = QHBoxLayout(self.bilateral_widget)
-        bilateral_label = QLabel("Diameter:")
-        bilateral_label.setStyleSheet("color: #343a40; font-weight: bold;")
-        self.bilateral_slider = QSlider(Qt.Horizontal)
-        self.bilateral_slider.setRange(5, 50)
-        self.bilateral_slider.setValue(9)
-        self.bilateral_value = QLabel("9")
-        self.bilateral_value.setStyleSheet("font-weight: bold; color: #343a40;")
-        self.bilateral_slider.valueChanged.connect(lambda v: self.bilateral_value.setText(str(v)))
-        bilateral_layout.addWidget(bilateral_label)
-        bilateral_layout.addWidget(self.bilateral_slider)
-        bilateral_layout.addWidget(self.bilateral_value)
-        self.param_layout.addWidget(self.bilateral_widget)
         
         # Brightness/Contrast Parameters
         self.brightness_widget = QWidget()
@@ -543,6 +631,10 @@ class MainWindow(QMainWindow):
 
         # Initial control visibility
         self.method_changed()
+        
+        # Connect combo boxes to update parameters
+        self.blur_type_combo.currentTextChanged.connect(self.update_blur_parameters)
+        self.edge_type_combo.currentTextChanged.connect(self.update_edge_parameters)
 
     def load_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open image", "", "Images (*.png *.jpg *.bmp)")
@@ -600,6 +692,67 @@ class MainWindow(QMainWindow):
             self.lbl_result.setText("Processing result will appear here")
             self.result_hist_canvas.plot_hist(None)
 
+    def update_blur_parameters(self):
+        """Update parameter visibility based on selected blur type"""
+        blur_type = self.blur_type_combo.currentText()
+        
+        # Hide all blur parameters first
+        self.kernel_widget.setVisible(False)
+        self.bilateral_widget.setVisible(False)
+        self.sigma_widget.setVisible(False)
+        
+        # Show relevant parameters based on blur type
+        if blur_type == "Gaussian Blur":
+            self.kernel_widget.setVisible(True)
+            self.kernel_slider.setRange(1, 31)
+            self.kernel_slider.setValue(3)
+            self.kernel_value.setText("3")
+        elif blur_type == "Median Blur":
+            self.kernel_widget.setVisible(True)
+            self.kernel_slider.setRange(1, 31)
+            self.kernel_slider.setValue(3)
+            self.kernel_value.setText("3")
+        elif blur_type == "Mean Blur":
+            self.kernel_widget.setVisible(True)
+            self.kernel_slider.setRange(1, 31)
+            self.kernel_slider.setValue(3)
+            self.kernel_value.setText("3")
+        elif blur_type == "Bilateral Filter":
+            self.bilateral_widget.setVisible(True)
+            self.sigma_widget.setVisible(True)
+            self.bilateral_slider.setRange(5, 50)
+            self.bilateral_slider.setValue(9)
+            self.bilateral_value.setText("9")
+            self.sigma_slider.setRange(10, 200)
+            self.sigma_slider.setValue(75)
+            self.sigma_value.setText("75")
+
+    def update_edge_parameters(self):
+        """Update parameter visibility based on selected edge detection type"""
+        edge_type = self.edge_type_combo.currentText()
+        
+        # Hide all edge detection parameters first
+        self.canny_widget.setVisible(False)
+        self.sobel_widget.setVisible(False)
+        
+        # Show relevant parameters based on edge type
+        if edge_type == "Canny":
+            self.canny_widget.setVisible(True)
+            self.canny_thresh1_slider.setRange(10, 300)
+            self.canny_thresh1_slider.setValue(100)
+            self.canny_thresh1_value.setText("100")
+            self.canny_thresh2_slider.setRange(10, 300)
+            self.canny_thresh2_slider.setValue(200)
+            self.canny_thresh2_value.setText("200")
+        elif edge_type == "Sobel":
+            self.sobel_widget.setVisible(True)
+            self.sobel_slider.setRange(1, 7)
+            self.sobel_slider.setValue(3)
+            self.sobel_value.setText("3")
+        elif edge_type == "Laplacian":
+            # Laplacian tidak memerlukan parameter tambahan
+            pass
+
     def method_changed(self):
         method = self.method_list.currentItem().text() if self.method_list.currentItem() else ""
         
@@ -607,37 +760,30 @@ class MainWindow(QMainWindow):
         self.desc_label.setText(METHOD_DESCRIPTIONS.get(method, ""))
         
         # Sembunyikan semua parameter terlebih dahulu
+        self.blur_type_widget.setVisible(False)
+        self.edge_type_widget.setVisible(False)
         self.kernel_widget.setVisible(False)
         self.thresh_widget.setVisible(False)
         self.canny_widget.setVisible(False)
+        self.sobel_widget.setVisible(False)
         self.bilateral_widget.setVisible(False)
+        self.sigma_widget.setVisible(False)
         self.brightness_widget.setVisible(False)
         self.contrast_widget.setVisible(False)
         self.sharpen_widget.setVisible(False)
         
         # Tampilkan hanya parameter yang relevan
-        if method in ("Gaussian Blur", "Median Blur", "Morphology (Open)", 
-                     "Morphology (Close)", "Dilation", "Erosion"):
-            self.kernel_widget.setVisible(True)
-            self.kernel_slider.setRange(1, 31)
-            self.kernel_slider.setValue(3)
-            self.kernel_value.setText("3")
+        if method == "Blurring/Smoothing":
+            self.blur_type_widget.setVisible(True)
+            self.update_blur_parameters()
+            
+        elif method == "Edge Detection":
+            self.edge_type_widget.setVisible(True)
+            self.update_edge_parameters()
             
         elif method == "Threshold (Binary)":
             self.thresh_widget.setVisible(True)
             self.spin_thresh.setValue(127)
-            
-        elif method == "Canny Edge Detection":
-            self.canny_widget.setVisible(True)
-            self.canny_slider.setRange(10, 300)
-            self.canny_slider.setValue(100)
-            self.canny_value.setText("100")
-            
-        elif method == "Bilateral Filter":
-            self.bilateral_widget.setVisible(True)
-            self.bilateral_slider.setRange(5, 50)
-            self.bilateral_slider.setValue(9)
-            self.bilateral_value.setText("9")
             
         elif method == "Brightness/Contrast Adjustment":
             self.brightness_widget.setVisible(True)
@@ -652,7 +798,7 @@ class MainWindow(QMainWindow):
             self.sharpen_value.setText("100")
         
         # Untuk metode tanpa parameter (Image Negative, Grayscale, Histogram Equalization, 
-        # Sobel Edge Detection, Laplacian Edge Detection) - tidak menampilkan parameter apapun
+        # Morphology operations) - tidak menampilkan parameter apapun
 
     def apply_method(self):
         if self.orig is None:
@@ -680,79 +826,93 @@ class MainWindow(QMainWindow):
                 _, th = cv2.threshold(gray, t, 255, cv2.THRESH_BINARY)
                 self.result = th
             
-            elif method == "Gaussian Blur":
-                k = int(self.kernel_slider.value())
-                if k % 2 == 0:  # Kernel harus ganjil
-                    k += 1
-                if k < 1: k = 1
-                blur = cv2.GaussianBlur(img, (k, k), 0)
-                self.result = blur
+            elif method == "Blurring/Smoothing":
+                blur_type = self.blur_type_combo.currentText()
+                
+                if blur_type == "Gaussian Blur":
+                    k = int(self.kernel_slider.value())
+                    if k % 2 == 0:  # Kernel harus ganjil
+                        k += 1
+                    if k < 1: k = 1
+                    blur = cv2.GaussianBlur(img, (k, k), 0)
+                    self.result = blur
+                    
+                elif blur_type == "Median Blur":
+                    k = int(self.kernel_slider.value())
+                    if k % 2 == 0:  # Kernel harus ganjil
+                        k += 1
+                    if k < 1: k = 1
+                    med = cv2.medianBlur(img, k)
+                    self.result = med
+                    
+                elif blur_type == "Mean Blur":
+                    k = int(self.kernel_slider.value())
+                    if k < 1: k = 1
+                    # Mean blur menggunakan box filter
+                    blur = cv2.blur(img, (k, k))
+                    self.result = blur
+                    
+                elif blur_type == "Bilateral Filter":
+                    d = int(self.bilateral_slider.value())
+                    sigma = int(self.sigma_slider.value())
+                    bilateral = cv2.bilateralFilter(img, d, sigma, sigma)
+                    self.result = bilateral
             
-            elif method == "Median Blur":
-                k = int(self.kernel_slider.value())
-                if k % 2 == 0:  # Kernel harus ganjil
-                    k += 1
-                if k < 1: k = 1
-                med = cv2.medianBlur(img, k)
-                self.result = med
-            
-            elif method == "Bilateral Filter":
-                d = int(self.bilateral_slider.value())
-                bilateral = cv2.bilateralFilter(img, d, 75, 75)
-                self.result = bilateral
-            
-            elif method == "Canny Edge Detection":
-                v = int(self.canny_slider.value())
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                edges = cv2.Canny(gray, v//2, v)
-                self.result = edges
-            
-            elif method == "Sobel Edge Detection":
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                # Sobel dengan kernel default 3x3
-                sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-                sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-                sobel = np.sqrt(sobelx**2 + sobely**2)
-                sobel = np.uint8(255 * sobel / np.max(sobel)) if np.max(sobel) > 0 else np.zeros_like(sobelx, dtype=np.uint8)
-                self.result = sobel
-            
-            elif method == "Laplacian Edge Detection":
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-                laplacian = np.uint8(np.absolute(laplacian))
-                self.result = laplacian
+            elif method == "Edge Detection":
+                edge_type = self.edge_type_combo.currentText()
+                
+                if edge_type == "Canny":
+                    threshold1 = int(self.canny_thresh1_slider.value())
+                    threshold2 = int(self.canny_thresh2_slider.value())
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, threshold1, threshold2)
+                    self.result = edges
+                    
+                elif edge_type == "Sobel":
+                    k = int(self.sobel_slider.value())
+                    if k % 2 == 0:  # Kernel harus ganjil
+                        k += 1
+                    if k < 1: k = 1
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=k)
+                    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=k)
+                    sobel = np.sqrt(sobelx**2 + sobely**2)
+                    sobel = np.uint8(255 * sobel / np.max(sobel)) if np.max(sobel) > 0 else np.zeros_like(sobelx, dtype=np.uint8)
+                    self.result = sobel
+                    
+                elif edge_type == "Laplacian":
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+                    laplacian = np.uint8(np.absolute(laplacian))
+                    self.result = laplacian
             
             elif method == "Morphology (Open)":
-                k = int(self.kernel_slider.value())
-                if k < 1: k = 1
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+                # Default kernel size 3x3 untuk morphology
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
                 opened = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
                 self.result = opened
             
             elif method == "Morphology (Close)":
-                k = int(self.kernel_slider.value())
-                if k < 1: k = 1
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+                # Default kernel size 3x3 untuk morphology
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
                 closed = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
                 self.result = closed
             
             elif method == "Dilation":
-                k = int(self.kernel_slider.value())
-                if k < 1: k = 1
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+                # Default kernel size 3x3 untuk dilation
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
                 dilated = cv2.dilate(th, kernel, iterations=1)
                 self.result = dilated
             
             elif method == "Erosion":
-                k = int(self.kernel_slider.value())
-                if k < 1: k = 1
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+                # Default kernel size 3x3 untuk erosion
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
                 eroded = cv2.erode(th, kernel, iterations=1)
@@ -765,10 +925,9 @@ class MainWindow(QMainWindow):
                 self.result = adjusted
             
             elif method == "Sharpen / Contrast":
-                alpha = self.sharpen_slider.value() / 100.0
-                kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+                kernel = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
                 sharp = cv2.filter2D(img, -1, kernel)
-                out = cv2.convertScaleAbs(sharp, alpha=alpha, beta=0)
+                out = cv2.convertScaleAbs(sharp, alpha=1, beta=0)
                 self.result = out
             
             else:
