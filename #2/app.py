@@ -1,12 +1,13 @@
 import sys
 import cv2
 import numpy as np
+import time  # --- PERUBAHAN ---: Import modul time
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QFileDialog, QListWidget, QListWidgetItem, QSlider, QGroupBox, QFormLayout, 
     QSpinBox, QFrame, QDoubleSpinBox, QScrollArea, QComboBox
 )
-# --- TAMBAHAN ---: Import QThread dan Signal
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage, QFont
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -99,12 +100,8 @@ class HistogramCanvas(FigureCanvas):
         self.ax.tick_params(axis='both', which='major', labelsize=8, colors='#343a40')
         self.draw()
 
-# --- TAMBAHAN ---: Worker thread untuk mengambil frame kamera
+# Worker thread untuk mengambil frame kamera
 class CameraThread(QThread):
-    """
-    Thread terpisah untuk mengambil frame dari OpenCV agar GUI tidak freeze.
-    Mengirimkan sinyal (frame_ready) yang berisi frame gambar (np.ndarray).
-    """
     frame_ready = Signal(np.ndarray)
 
     def __init__(self, parent=None):
@@ -113,7 +110,7 @@ class CameraThread(QThread):
         self.cap = None
 
     def run(self):
-        self.cap = cv2.VideoCapture(0)  # Buka kamera default
+        self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             print("Error: Tidak dapat membuka kamera.")
             return
@@ -122,9 +119,8 @@ class CameraThread(QThread):
         while self.is_running and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
-                self.frame_ready.emit(frame)  # Kirim frame ke main thread
+                self.frame_ready.emit(frame)
             else:
-                # Jika gagal membaca frame, berhenti
                 self.is_running = False
         
         if self.cap:
@@ -132,9 +128,8 @@ class CameraThread(QThread):
         print("Camera thread stopped.")
 
     def stop(self):
-        """Menghentikan loop thread dan melepaskan kamera."""
         self.is_running = False
-        self.wait()  # Tunggu thread selesai sebelum keluar
+        self.wait()
         if self.cap:
             self.cap.release()
             
@@ -142,12 +137,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Processing App - Enhanced (12 Fitur) - PySide6 + OpenCV")
-        self.orig = None  # original cv image (BGR)
-        self.result = None  # result cv image (BGR or gray)
+        self.orig = None
+        self.result = None
         
-        # --- TAMBAHAN ---: Inisialisasi variabel kamera
         self.cam_thread = None
         self.is_cam_running = False
+        self.is_processing = False
+        
+        # --- PERUBAHAN ---: Tambahkan pelacak waktu untuk histogram
+        self.last_hist_update_time = 0
         
         self._setup_ui()
 
@@ -171,22 +169,10 @@ class MainWindow(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #f8f9fa;
-                width: 10px;
-            }
-            QScrollBar::handle:vertical {
-                background: #ced4da;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #adb5bd;
-            }
+            QScrollArea { border: none; background-color: transparent; }
+            QScrollBar:vertical { border: none; background: #f8f9fa; width: 10px; }
+            QScrollBar::handle:vertical { background: #ced4da; border-radius: 5px; }
+            QScrollBar::handle:vertical:hover { background: #adb5bd; }
         """)
         
         left_layout = QVBoxLayout()
@@ -199,11 +185,8 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("""
             QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #343a40;
-                padding: 10px;
-                border-bottom: 2px solid #e9ecef;
+                font-size: 18px; font-weight: bold; color: #343a40;
+                padding: 10px; border-bottom: 2px solid #e9ecef;
             }
         """)
         left_layout.addWidget(title)
@@ -212,74 +195,43 @@ class MainWindow(QMainWindow):
         file_group = QGroupBox("📁 File & Camera Operations")
         file_group.setStyleSheet("""
             QGroupBox {
-                font-weight: bold;
-                color: #495057;
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                font-weight: bold; color: #495057; border: 1px solid #dee2e6;
+                border-radius: 8px; margin-top: 10px; padding-top: 10px;
             }
             QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                color: #343a40;
+                subcontrol-origin: margin; left: 10px;
+                padding: 0 5px 0 5px; color: #343a40;
             }
         """)
         file_layout = QVBoxLayout()
         
         self.btn_load = QPushButton("📁 Load Image")
-        
-        # --- TAMBAHAN ---: Buat tombol Start dan Stop Camera
         self.btn_start_cam = QPushButton("📸 Start Camera")
         self.btn_stop_cam = QPushButton("⏹️ Stop Camera")
-        
         self.btn_save = QPushButton("💾 Save Result")
         self.btn_reset = QPushButton("🔄 Reset")
         
-        # --- TAMBAHAN ---: Beri style untuk tombol baru
         btn_style = """
             QPushButton {
-                background-color: #ffffff;
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
-                color: #495057;
+                background-color: #ffffff; border: 1px solid #ced4da; border-radius: 5px;
+                padding: 8px; font-weight: bold; color: #495057;
             }
-            QPushButton:hover {
-                background-color: #e9ecef;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-            }
-            QPushButton:disabled {
-                background-color: #f8f9fa;
-                color: #adb5bd;
-            }
+            QPushButton:hover { background-color: #e9ecef; }
+            QPushButton:pressed { background-color: #dee2e6; }
+            QPushButton:disabled { background-color: #f8f9fa; color: #adb5bd; }
         """
-        
-        # --- TAMBAHAN ---: Modifikasi style untuk tombol Start/Stop
         start_cam_style = """
             QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: 1px solid #28a745;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
+                background-color: #28a745; color: white; border: 1px solid #28a745;
+                border-radius: 5px; padding: 8px; font-weight: bold;
             }
             QPushButton:hover { background-color: #218838; }
             QPushButton:disabled { background-color: #f8f9fa; color: #adb5bd; border: 1px solid #ced4da; }
         """
         stop_cam_style = """
             QPushButton {
-                background-color: #dc3545;
-                color: white;
-                border: 1px solid #dc3545;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
+                background-color: #dc3545; color: white; border: 1px solid #dc3545;
+                border-radius: 5px; padding: 8px; font-weight: bold;
             }
             QPushButton:hover { background-color: #c82333; }
             QPushButton:disabled { background-color: #f8f9fa; color: #adb5bd; border: 1px solid #ced4da; }
@@ -291,27 +243,22 @@ class MainWindow(QMainWindow):
         self.btn_start_cam.setStyleSheet(start_cam_style)
         self.btn_stop_cam.setStyleSheet(stop_cam_style)
 
-        # --- TAMBAHAN ---: Hubungkan tombol baru
         self.btn_load.clicked.connect(self.load_image)
         self.btn_start_cam.clicked.connect(self.start_camera)
         self.btn_stop_cam.clicked.connect(self.stop_camera)
         self.btn_save.clicked.connect(self.save_result)
         self.btn_reset.clicked.connect(self.reset)
         
-        # --- TAMBAHAN ---: Tambahkan tombol ke layout
         file_layout.addWidget(self.btn_load)
-        
         cam_layout = QHBoxLayout()
         cam_layout.addWidget(self.btn_start_cam)
         cam_layout.addWidget(self.btn_stop_cam)
         file_layout.addLayout(cam_layout)
-        
         file_layout.addWidget(self.btn_save)
         file_layout.addWidget(self.btn_reset)
         file_group.setLayout(file_layout)
         left_layout.addWidget(file_group)
         
-        # --- TAMBAHAN ---: Set state awal tombol
         self.btn_stop_cam.setEnabled(False)
         
         # Processing Methods Group
@@ -321,71 +268,44 @@ class MainWindow(QMainWindow):
         method_layout.setSpacing(10)
         method_layout.setContentsMargins(10, 15, 10, 10)
         
-        # Label untuk deskripsi
         self.desc_label = QLabel("Pilih metode processing")
         self.desc_label.setStyleSheet("""
             QLabel {
-                background-color: #e7f3ff;
-                border: 1px solid #b3d9ff;
-                border-radius: 5px;
-                padding: 8px;
-                font-size: 11px;
-                color: #004085;
-                font-weight: bold;
+                background-color: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 5px;
+                padding: 8px; font-size: 11px; color: #004085; font-weight: bold;
             }
         """)
         self.desc_label.setWordWrap(True)
         method_layout.addWidget(self.desc_label)
         
-        # ListWidget untuk methods
         self.method_list = QListWidget()
         self.method_list.setMaximumHeight(250)
         self.method_list.setStyleSheet("""
             QListWidget {
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                background-color: #ffffff;
-                outline: none;
-                color: #343a40;
+                border: 1px solid #ced4da; border-radius: 5px;
+                background-color: #ffffff; outline: none; color: #343a40;
             }
-            QListWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #e9ecef;
-                color: #343a40;
-            }
-            QListWidget::item:selected {
-                background-color: #007bff;
-                color: white;
-                font-weight: bold;
-            }
-            QListWidget::item:hover {
-                background-color: #e9ecef;
-                color: #343a40;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #f8f9fa;
-                width: 10px;
-            }
-            QScrollBar::handle:vertical {
-                background: #ced4da;
-                border-radius: 5px;
-            }
+            QListWidget::item { padding: 8px; border-bottom: 1px solid #e9ecef; color: #343a40; }
+            QListWidget::item:selected { background-color: #007bff; color: white; font-weight: bold; }
+            QListWidget::item:hover { background-color: #e9ecef; color: #343a40; }
+            QScrollBar:vertical { border: none; background: #f8f9fa; width: 10px; }
+            QScrollBar::handle:vertical { background: #ced4da; border-radius: 5px; }
         """)
         
         for method in METHODS:
-            item = QListWidgetItem(method)
-            self.method_list.addItem(item)
+            self.method_list.addItem(QListWidgetItem(method))
         
         self.method_list.itemSelectionChanged.connect(self.method_changed)
         self.method_list.setCurrentRow(0)
         method_layout.addWidget(self.method_list)
         
-        # Parameter Container - untuk menampung semua kontrol parameter
         self.param_container = QWidget()
         self.param_layout = QVBoxLayout(self.param_container)
         self.param_layout.setSpacing(8)
         self.param_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # --- (Semua widget parameter dari Blurring, Edge, Kernel, Canny, dll. tetap sama) ---
+        # (Saya singkat di sini agar tidak terlalu panjang, tapi ini semua ada di kode Anda)
         
         # Blur Type ComboBox
         self.blur_type_widget = QWidget()
@@ -394,16 +314,7 @@ class MainWindow(QMainWindow):
         blur_type_label.setStyleSheet("color: #343a40; font-weight: bold;")
         self.blur_type_combo = QComboBox()
         self.blur_type_combo.addItems(["Gaussian Blur", "Median Blur", "Mean Blur", "Bilateral Filter"])
-        self.blur_type_combo.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                padding: 5px;
-                background-color: #ffffff;
-                color: #343a40;
-                font-weight: bold;
-            }
-        """)
+        self.blur_type_combo.setStyleSheet("QComboBox { border: 1px solid #ced4da; border-radius: 5px; padding: 5px; background-color: #ffffff; color: #343a40; font-weight: bold; }")
         blur_type_layout.addWidget(blur_type_label)
         blur_type_layout.addWidget(self.blur_type_combo)
         self.param_layout.addWidget(self.blur_type_widget)
@@ -415,16 +326,7 @@ class MainWindow(QMainWindow):
         edge_type_label.setStyleSheet("color: #343a40; font-weight: bold;")
         self.edge_type_combo = QComboBox()
         self.edge_type_combo.addItems(["Canny", "Sobel", "Laplacian"])
-        self.edge_type_combo.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                padding: 5px;
-                background-color: #ffffff;
-                color: #343a40;
-                font-weight: bold;
-            }
-        """)
+        self.edge_type_combo.setStyleSheet("QComboBox { border: 1px solid #ced4da; border-radius: 5px; padding: 5px; background-color: #ffffff; color: #343a40; font-weight: bold; }")
         edge_type_layout.addWidget(edge_type_label)
         edge_type_layout.addWidget(self.edge_type_combo)
         self.param_layout.addWidget(self.edge_type_widget)
@@ -480,8 +382,6 @@ class MainWindow(QMainWindow):
         # Canny Parameters
         self.canny_widget = QWidget()
         canny_layout = QVBoxLayout(self.canny_widget)
-        
-        # Threshold 1
         canny_thresh1_widget = QWidget()
         canny_thresh1_layout = QHBoxLayout(canny_thresh1_widget)
         canny_thresh1_label = QLabel("Threshold 1:")
@@ -496,8 +396,6 @@ class MainWindow(QMainWindow):
         canny_thresh1_layout.addWidget(self.canny_thresh1_slider)
         canny_thresh1_layout.addWidget(self.canny_thresh1_value)
         canny_layout.addWidget(canny_thresh1_widget)
-        
-        # Threshold 2
         canny_thresh2_widget = QWidget()
         canny_thresh2_layout = QHBoxLayout(canny_thresh2_widget)
         canny_thresh2_label = QLabel("Threshold 2:")
@@ -512,7 +410,6 @@ class MainWindow(QMainWindow):
         canny_thresh2_layout.addWidget(self.canny_thresh2_slider)
         canny_thresh2_layout.addWidget(self.canny_thresh2_value)
         canny_layout.addWidget(canny_thresh2_widget)
-        
         self.param_layout.addWidget(self.canny_widget)
         
         # Sobel Parameters
@@ -539,16 +436,7 @@ class MainWindow(QMainWindow):
         self.spin_thresh = QSpinBox()
         self.spin_thresh.setRange(0, 255)
         self.spin_thresh.setValue(127)
-        self.spin_thresh.setStyleSheet("""
-            QSpinBox {
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                padding: 5px;
-                background-color: #ffffff;
-                color: #343a40;
-                font-weight: bold;
-            }
-        """)
+        self.spin_thresh.setStyleSheet("QSpinBox { border: 1px solid #ced4da; border-radius: 5px; padding: 5px; background-color: #ffffff; color: #343a40; font-weight: bold; }")
         thresh_layout.addWidget(thresh_label)
         thresh_layout.addWidget(self.spin_thresh)
         self.param_layout.addWidget(self.thresh_widget)
@@ -562,16 +450,7 @@ class MainWindow(QMainWindow):
         self.spin_brightness.setRange(-100, 100)
         self.spin_brightness.setValue(0)
         self.spin_brightness.setSingleStep(5)
-        self.spin_brightness.setStyleSheet("""
-            QDoubleSpinBox {
-                border: 1px solid #ced4da;
-                border-radius: 5px;
-                padding: 5px;
-                background-color: #ffffff;
-                color: #343a40;
-                font-weight: bold;
-            }
-        """)
+        self.spin_brightness.setStyleSheet("QDoubleSpinBox { border: 1px solid #ced4da; border-radius: 5px; padding: 5px; background-color: #ffffff; color: #343a40; font-weight: bold; }")
         brightness_layout.addWidget(bright_label)
         brightness_layout.addWidget(self.spin_brightness)
         self.param_layout.addWidget(self.brightness_widget)
@@ -604,36 +483,26 @@ class MainWindow(QMainWindow):
         sharpen_layout.addWidget(self.sharpen_slider)
         sharpen_layout.addWidget(self.sharpen_value)
         self.param_layout.addWidget(self.sharpen_widget)
+        
+        # --- (Akhir dari widget parameter) ---
 
-        # Tambahkan container parameter ke layout utama
         method_layout.addWidget(self.param_container)
         
-        # Apply Button
         apply_btn = QPushButton("🚀 Apply Processing")
         apply_btn.setStyleSheet("""
             QPushButton {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px;
-                font-weight: bold;
+                background-color: #007bff; color: white; border: none;
+                border-radius: 5px; padding: 10px; font-weight: bold;
             }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:pressed {
-                background-color: #004085;
-            }
+            QPushButton:hover { background-color: #0056b3; }
+            QPushButton:pressed { background-color: #004085; }
         """)
-        # --- MODIFIKASI ---: Panggil apply_and_update
         apply_btn.clicked.connect(self.apply_and_update)
         method_layout.addWidget(apply_btn)
         
         method_group.setLayout(method_layout)
         left_layout.addWidget(method_group)
         
-        # Set scroll area content
         scroll_widget = QWidget()
         scroll_widget.setLayout(left_layout)
         scroll_area.setWidget(scroll_widget)
@@ -644,28 +513,14 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(20)
         right_layout.setContentsMargins(20, 0, 20, 20)
         
-        # Original Image Section
         orig_section = QFrame()
-        orig_section.setStyleSheet("""
-            QFrame {
-                background-color: #ffffff;
-                border-radius: 10px;
-                border: 1px solid #dee2e6;
-            }
-        """)
+        orig_section.setStyleSheet("QFrame { background-color: #ffffff; border-radius: 10px; border: 1px solid #dee2e6; }")
         orig_layout = QVBoxLayout()
         orig_layout.setContentsMargins(15, 15, 15, 15)
         
         orig_label = QLabel("Original Image")
         orig_label.setAlignment(Qt.AlignCenter)
-        orig_label.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                color: #343a40;
-                padding: 5px;
-            }
-        """)
+        orig_label.setStyleSheet("QLabel { font-size: 16px; font-weight: bold; color: #343a40; padding: 5px; }")
         orig_layout.addWidget(orig_label)
         
         orig_content = QHBoxLayout()
@@ -674,12 +529,9 @@ class MainWindow(QMainWindow):
         self.lbl_orig.setFixedSize(400, 300)
         self.lbl_orig.setStyleSheet("""
             QLabel {
-                border: 2px dashed #ced4da;
-                border-radius: 8px;
-                background-color: #f8f9fa;
-                color: #6c757d;
-                font-size: 14px;
-                font-weight: bold;
+                border: 2px dashed #ced4da; border-radius: 8px;
+                background-color: #f8f9fa; color: #6c757d;
+                font-size: 14px; font-weight: bold;
             }
         """)
         
@@ -689,11 +541,9 @@ class MainWindow(QMainWindow):
         orig_content.addWidget(self.lbl_orig)
         orig_content.addWidget(self.orig_hist_canvas)
         orig_layout.addLayout(orig_content)
-        
         orig_section.setLayout(orig_layout)
         right_layout.addWidget(orig_section)
         
-        # Result Image Section
         result_section = QFrame()
         result_section.setStyleSheet(orig_section.styleSheet())
         result_layout = QVBoxLayout()
@@ -716,82 +566,88 @@ class MainWindow(QMainWindow):
         result_content.addWidget(self.lbl_result)
         result_content.addWidget(self.result_hist_canvas)
         result_layout.addLayout(result_content)
-        
         result_section.setLayout(result_layout)
         right_layout.addWidget(result_section)
         
         right_panel.setLayout(right_layout)
         
-        # Add panels to main layout
         main_layout.addWidget(scroll_area)
         main_layout.addWidget(right_panel)
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
         self.resize(1400, 950)
 
-        # Initial control visibility
         self.method_changed()
-        
-        # Connect combo boxes to update parameters
         self.blur_type_combo.currentTextChanged.connect(self.update_blur_parameters)
         self.edge_type_combo.currentTextChanged.connect(self.update_edge_parameters)
+        self.update_previews(update_histograms=True)
 
-    # --- TAMBAHAN ---: Fungsi untuk memulai kamera
     def start_camera(self):
         if self.is_cam_running:
             return
 
         print("Starting camera...")
         self.cam_thread = CameraThread(self)
-        # Hubungkan sinyal frame_ready ke slot update_camera_frame
         self.cam_thread.frame_ready.connect(self.update_camera_frame)
         self.cam_thread.start()
-
         self.is_cam_running = True
         
-        # Update UI state
+        # --- PERUBAHAN ---: Reset timer histogram saat kamera mulai
+        self.last_hist_update_time = 0
+        
         self.btn_start_cam.setEnabled(False)
         self.btn_stop_cam.setEnabled(True)
-        self.btn_load.setEnabled(False)  # Nonaktifkan load image saat kamera jalan
+        self.btn_load.setEnabled(False)
         self.lbl_orig.setText("Starting camera...")
         self.lbl_result.setText("Processing will start...")
         
-    # --- TAMBAHAN ---: Fungsi untuk menghentikan kamera
     def stop_camera(self):
         if not self.is_cam_running or not self.cam_thread:
             return
             
         print("Stopping camera...")
-        self.cam_thread.stop()  # Panggil method stop dari thread
+        self.cam_thread.stop()
         self.cam_thread = None
         self.is_cam_running = False
         
-        # Update UI state
         self.btn_start_cam.setEnabled(True)
         self.btn_stop_cam.setEnabled(False)
         self.btn_load.setEnabled(True)
-        self.reset() # Reset gambar ke kondisi terakhir (jika ada) atau kosong
+        
+        self.update_previews(update_histograms=True)
+        
         if self.orig is None:
              self.lbl_orig.setText("No image loaded")
              self.lbl_result.setText("Processing result will appear here")
 
-    # --- TAMBAHAN ---: Slot untuk menerima frame dari thread kamera
+    # --- INI ADALAH FUNGSI YANG PALING BANYAK BERUBAH ---
     def update_camera_frame(self, frame):
         """
         Slot ini dipanggil setiap kali CameraThread mengirimkan frame baru.
         """
-        if not self.is_cam_running:
+        if not self.is_cam_running or self.is_processing:
             return
 
-        # Webcams biasanya mirrored, flip secara horizontal
+        self.is_processing = True
+
         frame = cv2.flip(frame, 1)
+        self.orig = frame
+        self.apply_method()
         
-        self.orig = frame  # Set frame baru sebagai original
-        self.apply_method()  # LANGSUNG proses frame
-        self.update_previews()  # Tampilkan original dan hasil proses
+        # --- PERUBAHAN ---: Logika timer untuk histogram
+        current_time = time.time()
+        if (current_time - self.last_hist_update_time) > 5.0:
+            # Waktunya update histogram
+            self.update_previews(update_histograms=True)
+            self.last_hist_update_time = current_time # Reset timer
+        else:
+            # Belum waktunya, update gambar saja
+            self.update_previews(update_histograms=False)
+        
+        self.is_processing = False
+        # --- AKHIR PERUBAHAN DI FUNGSI INI ---
 
     def load_image(self):
-        # --- TAMBAHAN ---: Hentikan kamera jika sedang berjalan
         if self.is_cam_running:
             self.stop_camera()
             
@@ -803,7 +659,8 @@ class MainWindow(QMainWindow):
             return
         self.orig = img
         self.result = img.copy()
-        self.update_previews()
+        
+        self.update_previews(update_histograms=True)
 
     def save_result(self):
         if self.result is None:
@@ -817,20 +674,17 @@ class MainWindow(QMainWindow):
 
     def reset(self):
         if self.orig is None:
-            # Jika tidak ada gambar, kosongkan preview
             self.orig = None
             self.result = None
-            self.update_previews() # Ini akan menampilkan text default
+            self.update_previews(update_histograms=True) 
             return
             
-        # Jika kamera berjalan, self.orig akan langsung di-update di frame berikutnya
-        # Jika tidak, ini akan me-reset ke gambar yang di-load
         if not self.is_cam_running:
             self.result = self.orig.copy()
-            self.update_previews()
+            self.update_previews(update_histograms=True)
 
-    def update_previews(self):
-        # Original image preview and histogram
+    def update_previews(self, update_histograms=True):
+        # Original image preview
         if self.orig is not None:
             qimg_o = qimg_from_cv(self.orig)
             pix_o = QPixmap.fromImage(qimg_o).scaled(
@@ -838,13 +692,15 @@ class MainWindow(QMainWindow):
                 Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.lbl_orig.setPixmap(pix_o)
-            self.orig_hist_canvas.plot_hist(self.orig)
+            if update_histograms:
+                self.orig_hist_canvas.plot_hist(self.orig)
         else:
             self.lbl_orig.clear()
             self.lbl_orig.setText("No image loaded")
-            self.orig_hist_canvas.plot_hist(None)
+            if update_histograms:
+                self.orig_hist_canvas.plot_hist(None)
 
-        # Result image preview and histogram
+        # Result image preview
         if self.result is not None:
             qimg_r = qimg_from_cv(self.result)
             pix_r = QPixmap.fromImage(qimg_r).scaled(
@@ -852,33 +708,21 @@ class MainWindow(QMainWindow):
                 Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.lbl_result.setPixmap(pix_r)
-            self.result_hist_canvas.plot_hist(self.result)
+            if update_histograms:
+                self.result_hist_canvas.plot_hist(self.result)
         else:
             self.lbl_result.clear()
             self.lbl_result.setText("Processing result will appear here")
-            self.result_hist_canvas.plot_hist(None)
+            if update_histograms:
+                self.result_hist_canvas.plot_hist(None)
 
     def update_blur_parameters(self):
-        """Update parameter visibility based on selected blur type"""
         blur_type = self.blur_type_combo.currentText()
-        
-        # Hide all blur parameters first
         self.kernel_widget.setVisible(False)
         self.bilateral_widget.setVisible(False)
         self.sigma_widget.setVisible(False)
         
-        # Show relevant parameters based on blur type
-        if blur_type == "Gaussian Blur":
-            self.kernel_widget.setVisible(True)
-            self.kernel_slider.setRange(1, 31)
-            self.kernel_slider.setValue(3)
-            self.kernel_value.setText("3")
-        elif blur_type == "Median Blur":
-            self.kernel_widget.setVisible(True)
-            self.kernel_slider.setRange(1, 31)
-            self.kernel_slider.setValue(3)
-            self.kernel_value.setText("3")
-        elif blur_type == "Mean Blur":
+        if blur_type in ["Gaussian Blur", "Median Blur", "Mean Blur"]:
             self.kernel_widget.setVisible(True)
             self.kernel_slider.setRange(1, 31)
             self.kernel_slider.setValue(3)
@@ -894,14 +738,10 @@ class MainWindow(QMainWindow):
             self.sigma_value.setText("75")
 
     def update_edge_parameters(self):
-        """Update parameter visibility based on selected edge detection type"""
         edge_type = self.edge_type_combo.currentText()
-        
-        # Hide all edge detection parameters first
         self.canny_widget.setVisible(False)
         self.sobel_widget.setVisible(False)
         
-        # Show relevant parameters based on edge type
         if edge_type == "Canny":
             self.canny_widget.setVisible(True)
             self.canny_thresh1_slider.setRange(10, 300)
@@ -915,17 +755,12 @@ class MainWindow(QMainWindow):
             self.sobel_slider.setRange(1, 7)
             self.sobel_slider.setValue(3)
             self.sobel_value.setText("3")
-        elif edge_type == "Laplacian":
-            # Laplacian tidak memerlukan parameter tambahan
-            pass
 
     def method_changed(self):
         method = self.method_list.currentItem().text() if self.method_list.currentItem() else ""
-        
-        # Update deskripsi
         self.desc_label.setText(METHOD_DESCRIPTIONS.get(method, ""))
         
-        # Sembunyikan semua parameter terlebih dahulu
+        # Sembunyikan semua
         self.blur_type_widget.setVisible(False)
         self.edge_type_widget.setVisible(False)
         self.kernel_widget.setVisible(False)
@@ -938,51 +773,33 @@ class MainWindow(QMainWindow):
         self.contrast_widget.setVisible(False)
         self.sharpen_widget.setVisible(False)
         
-        # Tampilkan hanya parameter yang relevan
+        # Tampilkan yang relevan
         if method == "Blurring/Smoothing":
             self.blur_type_widget.setVisible(True)
             self.update_blur_parameters()
-            
         elif method == "Edge Detection":
             self.edge_type_widget.setVisible(True)
             self.update_edge_parameters()
-            
         elif method == "Threshold (Binary)":
             self.thresh_widget.setVisible(True)
             self.spin_thresh.setValue(127)
-            
         elif method == "Brightness/Contrast Adjustment":
             self.brightness_widget.setVisible(True)
             self.contrast_widget.setVisible(True)
             self.spin_brightness.setValue(0)
             self.spin_contrast.setValue(1.0)
-            
         elif method == "Sharpen / Contrast":
             self.sharpen_widget.setVisible(True)
             self.sharpen_slider.setRange(50, 300)
             self.sharpen_slider.setValue(100)
             self.sharpen_value.setText("100")
-        
-        # Untuk metode tanpa parameter (Image Negative, Grayscale, Histogram Equalization, 
-        # Morphology operations) - tidak menampilkan parameter apapun
 
-    # --- TAMBAHAN ---: Wrapper untuk tombol Apply
     def apply_and_update(self):
-        """
-        Fungsi ini dipanggil HANYA oleh tombol 'Apply'.
-        Jika kamera berjalan, pembaruan sudah otomatis.
-        Jika tidak, paksa pembaruan.
-        """
         self.apply_method()
         if not self.is_cam_running:
-            # Jika kamera tidak jalan, update_previews perlu dipanggil manual
-            self.update_previews()
+            self.update_previews(update_histograms=True)
 
     def apply_method(self):
-        """
-        Fungsi inti yang memproses 'self.orig' dan menyimpan ke 'self.result'.
-        Fungsi ini sekarang dipanggil oleh tombol 'Apply' DAN oleh live feed.
-        """
         if self.orig is None:
             self.result = None
             return
@@ -992,145 +809,84 @@ class MainWindow(QMainWindow):
         
         try:
             if method == "Image Negative":
-                inverted = cv2.bitwise_not(img)
-                self.result = inverted
-                
+                self.result = cv2.bitwise_not(img)
             elif method == "Grayscale":
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                self.result = gray
-            
+                self.result = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             elif method == "Histogram Equalization":
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                eq = cv2.equalizeHist(gray)
-                self.result = eq
-            
+                self.result = cv2.equalizeHist(gray)
             elif method == "Threshold (Binary)":
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 t = int(self.spin_thresh.value())
-                _, th = cv2.threshold(gray, t, 255, cv2.THRESH_BINARY)
-                self.result = th
-            
+                _, self.result = cv2.threshold(gray, t, 255, cv2.THRESH_BINARY)
             elif method == "Blurring/Smoothing":
                 blur_type = self.blur_type_combo.currentText()
-                
                 if blur_type == "Gaussian Blur":
                     k = int(self.kernel_slider.value())
-                    if k % 2 == 0:  # Kernel harus ganjil
-                        k += 1
+                    if k % 2 == 0: k += 1
                     if k < 1: k = 1
-                    blur = cv2.GaussianBlur(img, (k, k), 0)
-                    self.result = blur
-                    
+                    self.result = cv2.GaussianBlur(img, (k, k), 0)
                 elif blur_type == "Median Blur":
                     k = int(self.kernel_slider.value())
-                    if k % 2 == 0:  # Kernel harus ganjil
-                        k += 1
+                    if k % 2 == 0: k += 1
                     if k < 1: k = 1
-                    med = cv2.medianBlur(img, k)
-                    self.result = med
-                    
+                    self.result = cv2.medianBlur(img, k)
                 elif blur_type == "Mean Blur":
                     k = int(self.kernel_slider.value())
                     if k < 1: k = 1
-                    # Mean blur menggunakan box filter
-                    blur = cv2.blur(img, (k, k))
-                    self.result = blur
-                    
+                    self.result = cv2.blur(img, (k, k))
                 elif blur_type == "Bilateral Filter":
                     d = int(self.bilateral_slider.value())
                     sigma = int(self.sigma_slider.value())
-                    bilateral = cv2.bilateralFilter(img, d, sigma, sigma)
-                    self.result = bilateral
-            
+                    self.result = cv2.bilateralFilter(img, d, sigma, sigma)
             elif method == "Edge Detection":
                 edge_type = self.edge_type_combo.currentText()
-                
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 if edge_type == "Canny":
-                    threshold1 = int(self.canny_thresh1_slider.value())
-                    threshold2 = int(self.canny_thresh2_slider.value())
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    edges = cv2.Canny(gray, threshold1, threshold2)
-                    self.result = edges
-                    
+                    t1 = int(self.canny_thresh1_slider.value())
+                    t2 = int(self.canny_thresh2_slider.value())
+                    self.result = cv2.Canny(gray, t1, t2)
                 elif edge_type == "Sobel":
                     k = int(self.sobel_slider.value())
-                    if k % 2 == 0:  # Kernel harus ganjil
-                        k += 1
+                    if k % 2 == 0: k += 1
                     if k < 1: k = 1
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=k)
                     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=k)
                     sobel = np.sqrt(sobelx**2 + sobely**2)
-                    sobel = np.uint8(255 * sobel / np.max(sobel)) if np.max(sobel) > 0 else np.zeros_like(sobelx, dtype=np.uint8)
-                    self.result = sobel
-                    
+                    self.result = np.uint8(255 * sobel / np.max(sobel)) if np.max(sobel) > 0 else np.zeros_like(sobelx, dtype=np.uint8)
                 elif edge_type == "Laplacian":
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-                    laplacian = np.uint8(np.absolute(laplacian))
-                    self.result = laplacian
-            
-            elif method == "Morphology (Open)":
-                # Default kernel size 3x3 untuk morphology
+                    self.result = np.uint8(np.absolute(laplacian))
+            elif method in ["Morphology (Open)", "Morphology (Close)", "Dilation", "Erosion"]:
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-                opened = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
-                self.result = opened
-            
-            elif method == "Morphology (Close)":
-                # Default kernel size 3x3 untuk morphology
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-                closed = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
-                self.result = closed
-            
-            elif method == "Dilation":
-                # Default kernel size 3x3 untuk dilation
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-                dilated = cv2.dilate(th, kernel, iterations=1)
-                self.result = dilated
-            
-            elif method == "Erosion":
-                # Default kernel size 3x3 untuk erosion
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, th = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-                eroded = cv2.erode(th, kernel, iterations=1)
-                self.result = eroded
-            
+                if method == "Morphology (Open)":
+                    self.result = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
+                elif method == "Morphology (Close)":
+                    self.result = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
+                elif method == "Dilation":
+                    self.result = cv2.dilate(th, kernel, iterations=1)
+                elif method == "Erosion":
+                    self.result = cv2.erode(th, kernel, iterations=1)
             elif method == "Brightness/Contrast Adjustment":
                 brightness = float(self.spin_brightness.value())
                 contrast = float(self.spin_contrast.value())
-                adjusted = cv2.convertScaleAbs(img, alpha=contrast, beta=brightness)
-                self.result = adjusted
-            
+                self.result = cv2.convertScaleAbs(img, alpha=contrast, beta=brightness)
             elif method == "Sharpen / Contrast":
                 kernel = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
                 sharp = cv2.filter2D(img, -1, kernel)
-                out = cv2.convertScaleAbs(sharp, alpha=1, beta=0)
-                self.result = out
-            
+                self.result = cv2.convertScaleAbs(sharp, alpha=1, beta=0)
             else:
                 self.result = img
-                
-            # --- PENTING ---:
-            # update_previews() TIDAK dipanggil di sini lagi.
-            # Pemanggilnya yang bertanggung jawab (update_camera_frame atau apply_and_update)
-            
         except Exception as e:
             print(f"Error applying method {method}: {e}")
-            self.result = img # Jika error, kembalikan gambar asli
+            self.result = img
 
-    # --- TAMBAHAN ---: Pastikan kamera berhenti saat window ditutup
     def closeEvent(self, event):
-        """Override QMainWindow.closeEvent"""
         print("Closing window...")
-        self.stop_camera()  # Panggil stop_camera untuk melepaskan resource
-        event.accept()  # Terima event penutupan
+        self.stop_camera()
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
